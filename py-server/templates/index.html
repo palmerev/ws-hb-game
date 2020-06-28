@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ws-hb-game Home</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.3.0/socket.io.js" integrity="sha256-bQmrZe4yPnQrLTY+1gYylfNMBuGfnT/HKsCGX+9Xuqo=" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <style>
+        button {
+            margin: 20px;
+        }
+        .error-msg {
+            color: #FF2222;
+        }
+        label {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <h1>Hello</h1>
+    <p class="error-msg"></p>
+    <p>Game <span id="game-id-display"></span></p>
+    <div id="players">
+        <p><strong>Players:</strong></p>
+    </div>
+    <div class="form-wrapper">
+        <div class="form-group">
+            <label for="game-id">Game ID</label>
+            <input type=text id="game-id" maxlength="50" />
+        </div>
+        <div>
+            <label for="username">Your Name</label>
+            <input type=text id="username" maxlength="10" />
+        </div>
+        <button id="create-game">Create New Game</button>
+        <button id="join-game">Join Game</button>
+    </div>
+</body>
+<script type="text/javascript">
+    var yourUsername = '';
+    var socket = io.connect('http://' + document.domain + ':' + location.port);
+    socket.on('connect', function connect() {
+        console.log('connected');
+    });
+    socket.on('disconnect', function disconnect() {
+        console.log('disconnected');
+    })
+    socket.on('message', function message(msg) {
+        console.log('message', msg);
+    });
+    socket.on('connectResponse', function(msg) {
+        console.log('connectResponse::msg', msg);
+    });
+    socket.on('createGameResponse', function (msg) {
+        if (msg.error) {
+            console.log(msg.error);
+            $('.error-msg').text(msg.error);
+        } else if (msg.gameId) {
+            console.log('game created', msg);
+            $('#game-id-display').text(msg.gameId);
+            $('#players').append('<p>' + $('#username').val() || 'Unknown player' + ' (You)</p>');
+        } else {
+            console.error('something went wrong', msg);
+        }
+    });
+    socket.on('joinGameResponse', function (msg) {
+        if (msg.error) {
+            console.log(msg.error);
+            $('.error-msg').text(msg.error);
+        } else if (msg.gameId) {
+            console.log('game joined', msg);
+            $('#game-id-display').text(msg.gameId);
+            var playerEntry = msg.username === yourUsername
+                ? msg.username + ' (You)'
+                : msg.username;
+            $('#players').append('<p>' + playerEntry + '</p>');
+        } else {
+            console.error('something went wrong', msg);
+        }
+    })
+
+    $('input#game-id').on('change', function() {
+        if ($(this).val()) {
+            $('button#create-game').prop('disabled', true);
+        } else {
+            $('button#create-game').prop('disabled', false);
+        }
+    });
+
+    $('button#create-game').on('click', function() {
+        var un = $('#username').val();
+        if (!un) {
+            console.log('username is required');
+            return;
+        }
+        yourUsername = un;
+        var gameId = $('#game-id').val(); // possibly empty string
+        socket.emit('createGame', {
+            gameId: gameId,
+            username: un
+        });
+    });
+
+    $('button#join-game').on('click', function() {
+        console.log('join game clicked');
+        socket.emit('joinGame', {
+            gameId: $('#game-id').val(),
+            username: $('#username').val()
+        });
+    });
+</script>
+</html>
