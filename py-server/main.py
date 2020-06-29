@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 
 from flask import Flask, render_template, request
 from flask_socketio import (
@@ -19,7 +19,7 @@ socketio = SocketIO(app)
 MAX_GAMES = 5
 MAX_PLAYERS = 10
 
-# CLIENTS = set() # top-level set of clients better for performance?
+CLIENTS = defaultdict(list)
 
 # maps game id to Game object
 GAMES = {}
@@ -35,9 +35,21 @@ class Game(object):
         if self.player_count == 1:
             self.players[player.client_id].active = True
 
-    def remove_player(self, player_id):
-        self.players.pop(player_id)
-        self.player_count = self.player_count
+    def remove_player(self, client_id):
+        return self.players.pop(client_id)
+
+    def get_player(self, client_id):
+        return self.players.get(client_id, None)
+
+    def get_active_player(self):
+        active_players = [p for p in self.players if p.active]
+        if len(active_players) == 1:
+            return active_players[0]
+        else:
+            raise Exception('Error: expected one active player, found', len(active_players))
+
+    def has_player(self, client_id):
+        return client_id in self.players
 
     @property
     def player_count(self):
@@ -79,12 +91,17 @@ def index():
 
 @socketio.on('connect')
 def handle_connect():
-    emit('connectResponse', {'data': 'Server connected'})
+    if request.sid not in CLIENTS:
+        client_id = gen_client_id()
+    else:
+        client_id = CLIENTS[request.sid]
+    emit('connectResponse', {'clientId': client_id})
 
 
 @socketio.on('disconnect')
 def handle_disconnect():
     print('Client disconnected')
+    del CLIENTS[request.sid]
 
 
 @socketio.on_error_default
@@ -99,6 +116,11 @@ def handle_error():
 @socketio.on('createGame')
 def handle_create_game(data, methods=['GET']):
     print('data', data)
+    if 'clientId' not in data:
+        print('Error: no clientId provided')
+        emit('createGameResponse',
+            {'error': "Error: no clientId provided."}
+        )
     if len(GAMES) >= MAX_GAMES:
         print('Error: can\'t create game. Too many games already in progress')
         emit('createGameResponse',
@@ -108,13 +130,17 @@ def handle_create_game(data, methods=['GET']):
         print('creating game')
         # prevent a client from joining more than one game at a time,
         # not including the first auto-generated room id (hence < 2)
-        games = [g for g in GAMES.values() if data['username'] in g.players]
-        if len() < 2:
+        games = [g for g in GAMES.values() if g.has_player(data['clientId'])]
+        if len(games) < 2:
             game_id = gen_game_id()
-            join_room(game_id)
-            if game_id not in GAMES:
-                GAMES[game_id] = Game(game_id)
-            emit('createGameResponse', {'gameId': game_id})
+            while game_id in GAMES:
+                game_id = gen_game_id()
+            new_game = Game(game_id)
+            GAMES[game_id] = new_game
+            new_game.add_player(HBPlayer(request.sid, data['username'], data['clientId']))
+            response = {'gameId': game_id, 'game': attr.asdict(new_game)}
+            print('createGameResponse', response)
+            emit('createGameResponse', response)
         else:
             in_progress = ', '.join(games[1:])
             print('this client is already in game(s):', in_progress)
@@ -137,7 +163,7 @@ def handle_join_game(data, methods=['POST']):
         else:
             join_room(data['gameId'])
             # TODO: validate data before returning
-            emit('joinGameResponse', dict(data), room=data['gameId'])
+            emit('joinGameResponse', data, room=data['gameId'])
     else:
         socketio.emit('joinGameResponse',
             {'error': 'Error: game {} is full'.format(data['gameId'])}
