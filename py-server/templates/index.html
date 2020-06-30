@@ -37,7 +37,10 @@
     </div>
 </body>
 <script type="text/javascript">
-    var yourUsername = '';
+    var state = {
+        username: null,
+        clientId: null
+    };
     var socket = io.connect('http://' + document.domain + ':' + location.port);
     socket.on('connect', function connect() {
         console.log('connected');
@@ -50,6 +53,13 @@
     });
     socket.on('connectResponse', function(msg) {
         console.log('connectResponse::msg', msg);
+        if (msg.error) {
+            console.log(msg.error);
+        } else if (msg.clientId) {
+            state.clientId = msg.clientId;
+        } else {
+            console.error('something went wrong', msg);
+        }
     });
     socket.on('createGameResponse', function (msg) {
         if (msg.error) {
@@ -58,24 +68,26 @@
         } else if (msg.gameId) {
             console.log('game created', msg);
             $('#game-id-display').text(msg.gameId);
-            $('#players').append('<p>' + $('#username').val() || 'Unknown player' + ' (You)</p>');
+            $('#players').append('<p>' + ($('#username').val() || 'Unknown player') + ' (You)</p>');
         } else {
-            console.error('something went wrong', msg);
+            console.error('createGameResponse::something went wrong', msg);
         }
     });
     socket.on('joinGameResponse', function (msg) {
         if (msg.error) {
             console.log(msg.error);
             $('.error-msg').text(msg.error);
-        } else if (msg.gameId) {
+        } else if (msg.game && msg.game.game_id) {
             console.log('game joined', msg);
-            $('#game-id-display').text(msg.gameId);
-            var playerEntry = msg.username === yourUsername
-                ? msg.username + ' (You)'
-                : msg.username;
-            $('#players').append('<p>' + playerEntry + '</p>');
+            $('#game-id-display').text(msg.game.game_id);
+            for (var playerId in msg.game.players) {
+                var plr = msg.game.players[playerId];
+                if (plr.client_id !== state.clientId) {
+                    $('#players').append(`<p id="foo"` + plr.username + '</p>');
+                }
+            }
         } else {
-            console.error('something went wrong', msg);
+            console.error('joinGameResponse::something went wrong', msg);
         }
     })
 
@@ -93,9 +105,10 @@
             console.log('username is required');
             return;
         }
-        yourUsername = un;
+        state.username = un;
         var gameId = $('#game-id').val(); // possibly empty string
         socket.emit('createGame', {
+            clientId: state.clientId,
             gameId: gameId,
             username: un
         });
@@ -104,6 +117,7 @@
     $('button#join-game').on('click', function() {
         console.log('join game clicked');
         socket.emit('joinGame', {
+            clientId: state.clientId,
             gameId: $('#game-id').val(),
             username: $('#username').val()
         });

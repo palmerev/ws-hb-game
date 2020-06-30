@@ -10,8 +10,8 @@ def gen_game_id(length=4):
 
 
 def gen_client_id():
-    return uuid.uuid4()
+    return uuid.uuid4().hex
 
 if __name__ == '__main__':
     for x in range(0, 20):
-        generate_game_id()
+        gen_game_id()

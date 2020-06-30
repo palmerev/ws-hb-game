@@ -1,13 +1,7 @@
 from collections import OrderedDict, defaultdict
 
 from flask import Flask, render_template, request
-from flask_socketio import (
-    SocketIO,
-    emit,
-    join_room,
-    leave_room,
-    close_room
-)
+from flask_socketio import SocketIO, emit, join_room, leave_room
 import attr
 
 from utils import gen_game_id, gen_client_id
@@ -100,13 +94,15 @@ def handle_connect():
 
 @socketio.on('disconnect')
 def handle_disconnect():
+    # TODO: cleanup players and games when a player disconnects
     print('Client disconnected')
     del CLIENTS[request.sid]
 
 
 @socketio.on_error_default
-def handle_error():
-    print('There was an error: sid={}, message={}, args={}'.format(
+def default_handle_error(e):
+    print('There was an error: {}, sid={}, message={}, args={}'.format(
+        repr(e),
         request.sid,
         request.event['message'],
         request.event['args']
@@ -115,17 +111,18 @@ def handle_error():
 
 @socketio.on('createGame')
 def handle_create_game(data, methods=['GET']):
-    print('data', data)
+    print('createGame::data', data)
     if 'clientId' not in data:
         print('Error: no clientId provided')
         emit('createGameResponse',
             {'error': "Error: no clientId provided."}
         )
-    if len(GAMES) >= MAX_GAMES:
+    elif len(GAMES) >= MAX_GAMES:
         print('Error: can\'t create game. Too many games already in progress')
         emit('createGameResponse',
             {'error': "Error: Can\'t create game. Too many games already in progress"}
         )
+
     else:
         print('creating game')
         # prevent a client from joining more than one game at a time,
@@ -137,6 +134,7 @@ def handle_create_game(data, methods=['GET']):
                 game_id = gen_game_id()
             new_game = Game(game_id)
             GAMES[game_id] = new_game
+            join_room(game_id)
             new_game.add_player(HBPlayer(request.sid, data['username'], data['clientId']))
             response = {'gameId': game_id, 'game': attr.asdict(new_game)}
             print('createGameResponse', response)
@@ -152,38 +150,42 @@ def handle_create_game(data, methods=['GET']):
 
 @socketio.on('joinGame')
 def handle_join_game(data, methods=['POST']):
-    print('joining game')
+    print('joinGame::data', data)
     if 'gameId' in data and data['gameId'] in GAMES:
-        count = GAMES[data['gameId']]
-        if count >= MAX_PLAYERS:
+        game_id = data['gameId']
+        if GAMES[game_id].player_count >= MAX_PLAYERS:
             print('Game is full')
             emit('joinGameResponse',
-                {'error': 'Error: game {} is full'.format(data['gameId'])}
+                {'error': 'Error: game {} is full'.format(game_id)}
             )
         else:
-            join_room(data['gameId'])
-            # TODO: validate data before returning
-            emit('joinGameResponse', data, room=data['gameId'])
+            print('joining game')
+            join_room(game_id)
+            player = HBPlayer(request.sid, data['username'], data['clientId'])
+            GAMES[game_id].add_player(player)
+            response = {
+                'game': attr.asdict(GAMES[game_id])
+            }
+            emit('joinGameResponse', response, room=game_id)
     else:
-        socketio.emit('joinGameResponse',
-            {'error': 'Error: game {} is full'.format(data['gameId'])}
+        emit('joinGameResponse',
+            {'error': 'Error: missing or invalid gameId. data={}'.format(data)}
         )
 
 
 @socketio.on('leaveGame')
 def handle_leave_game(data, methods=['POST']):
-    print('leaving game')
-    leave_room(data['room'])
-    if data['room'] in GAMES:
-        count = GAMES[data['room']]
-        GAMES[data['room']] = count - 1 if count > 0 else 0
+    print('leaving game', data)
+    game_id = data.get('gameId', '')
+    if game_id in GAMES and GAMES[game_id].has_player(data['clientId']):
+        GAMES[game_id].remove_player(data['client_id'])
+        leave_room(game_id)
     emit('leaveGameResponse', {'message': 'You left the game.'})
 
 
 @socketio.on('endGame')
 def handle_end_game(data, methods=['POST']):
-    print('ending game')
-    close_room(data['gameId'])
+    print('ending game', data)
 
 
 if __name__ == '__main__':
