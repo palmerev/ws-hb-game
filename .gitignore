@@ -34,3 +34,4 @@ MANIFEST
 
 # JS stuff
 node_modules
+.cache/
