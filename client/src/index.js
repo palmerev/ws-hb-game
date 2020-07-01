@@ -1,0 +1,77 @@
+import React from "react";
+import ReactDOM from "react-dom";
+import {
+    Button,
+    Form,
+} from "react-bootstrap";
+
+import { BrowserRouter as Router, Route } from "react-router-dom";
+
+import './styles/index.scss';
+
+const Nav = () => {
+    return (
+        <main>
+          <nav>
+            <ul>
+              <li><a href="/">Home</a></li>
+              <li><a href="/create">Create</a></li>
+              <li><a href="/join">Join</a></li>
+            </ul>
+            </nav>
+        </main>
+    );
+}
+
+const CreatePage = () => {
+    return <div>
+        <h1>Create Game</h1>
+    </div>
+}
+
+const JoinPage = () => {
+    return <div>
+        <h1>Join Game</h1>
+    </div>
+}
+
+
+class App extends React.Component {
+    constructor() {
+        state = {
+            clientId: null,
+            username: null,
+            game: null,
+        }
+    }
+    render() {
+        return (
+	    	<div>
+                <Nav />
+	            <div className="container">
+	                <h1>Hello {this.props.name}</h1>
+                    <Form>
+                      <Form.Group controlId="formBasicEmail">
+                        <Form.Label>Email address</Form.Label>
+                        <Form.Control type="email" placeholder="Enter email" />
+                        <Form.Text className="text-muted">
+                          We'll never share your email with anyone else.
+                        </Form.Text>
+                      </Form.Group>
+                      <Form.Group controlId="formBasicPassword">
+                        <Form.Label>Username</Form.Label>
+                        <Form.Control type="text" placeholder="Username" />
+                      </Form.Group>
+                      <Button variant="primary" type="submit">
+                        Submit
+                      </Button>
+                    </Form>
+	            </div>
+	        </div>
+        );
+    }
+}
+
+const app = document.getElementById("app");
+
+ReactDOM.render(<App name="Evan" />, app);
