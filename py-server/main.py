@@ -1,19 +1,14 @@
 from collections import OrderedDict, defaultdict
+from typing import Optional
 
-from flask import Flask, render_template, request
-from flask_socketio import SocketIO, emit, join_room, leave_room
 import attr
+from fastapi import FastAPI, WebSocket
+from fastapi.responses import HTMLResponse
 
 from utils import gen_game_id, gen_client_id
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = '023w8ythg08haw0ag8ashet08ahw308sphlcfnvas'
-socketio = SocketIO(app)
-
 MAX_GAMES = 5
 MAX_PLAYERS = 10
-
-CLIENTS = defaultdict(list)
 
 # maps game id to Game object
 GAMES = {}
@@ -77,116 +72,63 @@ class HBPlayer(object):
     word = attr.ib(type=str, default='')
     active = attr.ib(default=False)
 
+app = FastAPI()
 
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-
-@socketio.on('connect')
-def handle_connect():
-    if request.sid not in CLIENTS:
-        client_id = gen_client_id()
-    else:
-        client_id = CLIENTS[request.sid]
-    emit('connectResponse', {'clientId': client_id})
-
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    # TODO: cleanup players and games when a player disconnects
-    print('Client disconnected')
-    del CLIENTS[request.sid]
-
-
-@socketio.on_error_default
-def default_handle_error(e):
-    print('There was an error: {}, sid={}, message={}, args={}'.format(
-        repr(e),
-        request.sid,
-        request.event['message'],
-        request.event['args']
-    ))
-
-
-@socketio.on('createGame')
-def handle_create_game(data, methods=['GET']):
-    print('createGame::data', data)
-    if 'clientId' not in data:
-        print('Error: no clientId provided')
-        emit('createGameResponse',
-            {'error': "Error: no clientId provided."}
-        )
-    elif len(GAMES) >= MAX_GAMES:
-        print('Error: can\'t create game. Too many games already in progress')
-        emit('createGameResponse',
-            {'error': "Error: Can\'t create game. Too many games already in progress"}
-        )
-
-    else:
-        print('creating game')
-        # prevent a client from joining more than one game at a time,
-        # not including the first auto-generated room id (hence < 2)
-        games = [g for g in GAMES.values() if g.has_player(data['clientId'])]
-        if len(games) < 2:
-            game_id = gen_game_id()
-            while game_id in GAMES:
-                game_id = gen_game_id()
-            new_game = Game(game_id)
-            GAMES[game_id] = new_game
-            join_room(game_id)
-            new_game.add_player(HBPlayer(request.sid, data['username'], data['clientId']))
-            response = {'gameId': game_id, 'game': attr.asdict(new_game)}
-            print('createGameResponse', response)
-            emit('createGameResponse', response)
-        else:
-            in_progress = ', '.join(games[1:])
-            print('this client is already in game(s):', in_progress)
-            emit(
-                'createGameResponse',
-                {'error': 'Error: this client is already in {} game(s)'.format(len(games))}
-            )
-
-
-@socketio.on('joinGame')
-def handle_join_game(data, methods=['POST']):
-    print('joinGame::data', data)
-    if 'gameId' in data and data['gameId'] in GAMES:
-        game_id = data['gameId']
-        if GAMES[game_id].player_count >= MAX_PLAYERS:
-            print('Game is full')
-            emit('joinGameResponse',
-                {'error': 'Error: game {} is full'.format(game_id)}
-            )
-        else:
-            print('joining game')
-            join_room(game_id)
-            player = HBPlayer(request.sid, data['username'], data['clientId'])
-            GAMES[game_id].add_player(player)
-            response = {
-                'game': attr.asdict(GAMES[game_id])
+html = """
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Chat</title>
+    </head>
+    <body>
+        <h1>WebSocket Chat</h1>
+        <form action="" onsubmit="sendMessage(event)">
+            <input type="text" id="messageText" autocomplete="off"/>
+            <button>Send</button>
+        </form>
+        <ul id='messages'>
+        </ul>
+        <script>
+            var ws = new WebSocket("ws://localhost:8000/ws");
+            ws.onmessage = function(event) {
+                var messages = document.getElementById('messages')
+                var message = document.createElement('li')
+                var content = document.createTextNode(event.data)
+                message.appendChild(content)
+                messages.appendChild(message)
+            };
+            function sendMessage(event) {
+                var input = document.getElementById("messageText")
+                ws.send(input.value)
+                input.value = ''
+                event.preventDefault()
             }
-            emit('joinGameResponse', response, room=game_id)
-    else:
-        emit('joinGameResponse',
-            {'error': 'Error: missing or invalid gameId. data={}'.format(data)}
-        )
+        </script>
+    </body>
+</html>
+"""
 
 
-@socketio.on('leaveGame')
-def handle_leave_game(data, methods=['POST']):
-    print('leaving game', data)
-    game_id = data.get('gameId', '')
-    if game_id in GAMES and GAMES[game_id].has_player(data['clientId']):
-        GAMES[game_id].remove_player(data['client_id'])
-        leave_room(game_id)
-    emit('leaveGameResponse', {'message': 'You left the game.'})
+@app.get("/")
+async def read_root():
+    return {"Hello": "World"}
 
 
-@socketio.on('endGame')
-def handle_end_game(data, methods=['POST']):
-    print('ending game', data)
+@app.get("/items/{item_id}")
+async def read_item(item_id: int, q: Optional[str] = None):
+    return {"item_id": item_id, "q": q}
 
 
-if __name__ == '__main__':
-    socketio.run(app, debug=True)
+@app.get("/test-ws")
+async def get():
+    return HTMLResponse(html)
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    while True:
+        data = await websocket.receive_text()
+        print(f"Received: {data} from {websocket.headers}")
+        await websocket.send_text(f"Message text was: {data}")
+
