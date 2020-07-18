@@ -1,25 +1,32 @@
-from collections import OrderedDict, defaultdict
-from typing import Optional
+from typing import Optional, Dict
 
 import attr
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, Response
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
-from utils import gen_game_id, gen_client_id
+from utils import gen_client_id
 
-MAX_GAMES = 5
-MAX_PLAYERS = 10
+MAX_GAMES = 10
+MAX_PLAYERS_PER_GAME = 10
 
 # maps game id to Game object
 GAMES = {}
 
 
+class GameLockedException(Exception):
+    pass
+
+
 @attr.s
 class Game(object):
     game_id = attr.ib(type=str)
-    players = attr.ib(factory=OrderedDict)
+    players = attr.ib(factory=dict)
+    is_locked = attr.ib(default=False)
 
     def add_player(self, player):
+        if self.is_locked:
+            raise GameLockedException('This game is locked, new players cannot join.')
         self.players[player.client_id] = player
         if self.player_count == 1:
             self.players[player.client_id].active = True
@@ -44,7 +51,7 @@ class Game(object):
     def player_count(self):
         return len(self.players)
 
-    def next_turn(self):
+    def start_next_turn(self):
         # find the index of the active player and set active = False
         # use index+1 to set the next active player (0 if index +1 == self.player_count()
         if self.player_count == 1:
@@ -59,7 +66,7 @@ class Game(object):
                 idx = 0
             else:
                 self.players[idx].active = False
-                next_idx = idx + 1 if idx + 1 < self.player_count else 0
+                next_idx = idx + 1 if idx + 1 < len(self.players) else 0
                 self.players[next_idx].active = True
 
 
@@ -114,9 +121,10 @@ async def read_root():
     return {"Hello": "World"}
 
 
-@app.get("/items/{item_id}")
-async def read_item(item_id: int, q: Optional[str] = None):
-    return {"item_id": item_id, "q": q}
+@app.post("/hbgame/create-game")
+async def create_hb_game(data: Dict):
+    print(f"received request to create game")
+    return {"gameId": "test-test", "nickname": data.get('nickname')}
 
 
 @app.get("/test-ws")
@@ -125,10 +133,9 @@ async def get():
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, response: Response):
     await websocket.accept()
     while True:
         data = await websocket.receive_text()
-        print(f"Received: {data} from {websocket.headers}")
+        print(f"Received: {data}")
         await websocket.send_text(f"Message text was: {data}")
-
