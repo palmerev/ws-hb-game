@@ -91,7 +91,6 @@ adjectives = [
     'creamy',
     'creative',
     'credible',
-    'crisp',
     'crucial',
     'cuddly',
     'cunning',
@@ -196,7 +195,9 @@ animals = [
 
 
 def gen_game_id():
-    return random.choice(adjectives) + '-' + random.choice(animals)
+    words = [random.choice(adjectives)]
+    words.extend(random.sample(animals, 2))
+    return "-".join(words)
 
 
 if __name__ == '__main__':
