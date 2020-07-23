@@ -43,6 +43,7 @@ const GamePage = (props) => {
     const gameId = props.match.params.gameId;
     const clientId = cookie.load('flatcowhbclient');
     // if clientId cookie is undefined, this means that a player joined by visiting the url directly and needs to request, and be issued, a client id before they can officially join the game.
+    const [wsError,setWSError] = useState(null);
     if (!gameId) {
         return <p>What? No game id?</p>;
     }
@@ -51,18 +52,19 @@ const GamePage = (props) => {
         if (typeof clientId === 'undefined') {
             // request clientId
         }
-        const wsPing = new WebSocket('ws://dev.flatcow.space/ws/ping');
+        let wsPing = new WebSocket('ws://dev.flatcow.space/ws/ping');
         wsPing.onopen = (event) => {
             console.log('connection open:', event);
-            console.log({wsPing});
         }
         wsPing.onerror = (event) => {
             console.log('error:', event);
-            console.log({wsPing});
+            setWSError(event);
         }
         wsPing.onclose = (event) => {
             console.log('connection closed:', event);
-            console.log({wsPing});
+            if (wsError !== null) {
+                // try to re-establish the connection
+            }
         }
         wsPing.onmessage = (event) => {
             console.log('message::data:', JSON.parse(event.data));
