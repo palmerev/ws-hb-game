@@ -106,29 +106,40 @@ async def read_root():
 
 
 @app.websocket("/ws/ping")
-async def pong():
-    return {"pong": True}
+async def pong(websocket: WebSocket):
+    await websocket.accept()
+    while True:
+        data = await websocket.receive_json()
+        print(f"received message {data}")
+        await websocket.send_json({"type": "pong"})
 
-
+@app.get("/hb/join-game")
+async def join_hb_game(data: Dict, response: Response):
+    print(f"request to join game: {data}")
+    # TODO: only set cookie if it's not already set
+    response.set_cookie(key="flatcowhbclient", value=client_id, max_age=60 * 60 * 25)
+    return {"gameId": data.get("gameId")}
 
 @app.post("/hb/create-game", status_code=status.HTTP_201_CREATED)
 async def create_hb_game(data: Dict, response: Response):
-    print(f"/hb received request to create game: {data}")
+    print(f"request to create game: {data}")
     # TODO: limit number of games one client can start (based on cookie)
     game_id = gen_game_id()
     while game_id in GAMES:
         game_id = gen_game_id()
     game = Game(game_id)
+    client_id: str = gen_client_id()
     player = HBPlayer(
         data.get('nickname', 'Player{}'.format(game.player_count + 1)),
-        uuid.uuid4()
+        client_id
     )
     game.add_player(player)
     GAMES[game.id] = game
-    response.set_cookie(key="flatcowhbclient", value="test-flatcowhblclient")
+    response.set_cookie(key="flatcowhbclient", value=client_id, max_age=60 * 60 * 25)
     return {
         "gameId": game.id,
         "nickname": data.get('nickname'),
+        "gameCount": len(GAMES),
         }
 
 # html = """

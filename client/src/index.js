@@ -1,5 +1,5 @@
 import "babel-polyfill";
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import ReactDOM from "react-dom";
 import {
     Button,
@@ -13,6 +13,7 @@ import {
     NavLink,
     Redirect,
 } from "react-router-dom";
+import cookie from "react-cookies";
 import CreateGamePage from './components/CreateGamePage';
 
 import './styles/index.scss';
@@ -34,40 +35,53 @@ const Nav = () => {
 const HomePage = () => {
     return <div>
                 <h1>Home</h1>
-                <p>Example Form:</p>
-                <Form>
-                  <Form.Group controlId="formBasicEmail">
-                    <Form.Label>Email address</Form.Label>
-                    <Form.Control type="email" placeholder="Enter email" />
-                    <Form.Text className="text-muted">
-                      We'll never share your email with anyone else.
-                    </Form.Text>
-                  </Form.Group>
-                  <Form.Group controlId="formBasicPassword">
-                    <Form.Label>Username</Form.Label>
-                    <Form.Control type="text" placeholder="Username" />
-                  </Form.Group>
-                  <Button variant="primary" type="submit">
-                    Submit
-                  </Button>
-                </Form>
+                <p>Welcome Home</p>
             </div>
 }
 
-const JoinPage = () => {
-    return <div>
-        <h1>Join Game</h1>
-    </div>
-}
-
 const GamePage = (props) => {
-    // const [players] = useState([]);
-    console.log(props);
     const gameId = props.match.params.gameId;
+    const clientId = cookie.load('flatcowhbclient');
+    // if clientId cookie is undefined, this means that a player joined by visiting the url directly and needs to request, and be issued, a client id before they can officially join the game.
     if (!gameId) {
-        console.log('no gameId', gameId);
         return <p>What? No game id?</p>;
     }
+    const url = '/api/ws/ping';
+    useEffect(() => {
+        if (typeof clientId === 'undefined') {
+            // request clientId
+        }
+        const wsPing = new WebSocket('ws://dev.flatcow.space/ws/ping');
+        wsPing.onopen = (event) => {
+            console.log('connection open:', event);
+            console.log({wsPing});
+        }
+        wsPing.onerror = (event) => {
+            console.log('error:', event);
+            console.log({wsPing});
+        }
+        wsPing.onclose = (event) => {
+            console.log('connection closed:', event);
+            console.log({wsPing});
+        }
+        wsPing.onmessage = (event) => {
+            console.log('message::data:', JSON.parse(event.data));
+            const msg = JSON.parse(event.data);
+            if (msg.type === "pong") {
+                console.log("received pong");
+            } else {
+                console.log('received unknown message');
+            }
+        }
+        const pingInterval = setInterval(() => {
+            wsPing.send(JSON.stringify({'ping': true}));
+        }, 3000);
+
+        return () => clearInterval(pingInterval);
+    });
+    // setup socket connection
+    // recover from lost connection
+
     // fetch(
     //     url,
     //     {
@@ -92,6 +106,7 @@ const GamePage = (props) => {
     return (
         <div>
             <h1>Game Page for {gameId}! Woo!</h1>
+            <p>Connected as client: {clientId}</p>
         </div>
     )
 }
@@ -114,7 +129,6 @@ class App extends React.Component {
                 <Switch>
                     <Route path="/" exact component={HomePage} />
                     <Route path="/create" component={CreateGamePage} />
-                    <Route path="/join" component={JoinPage} />
                     <Route path="/hb/game/:gameId" component={GamePage} />
                 </Switch>
             </div>

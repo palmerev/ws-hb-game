@@ -35,3 +35,7 @@ MANIFEST
 # JS stuff
 node_modules
 .cache/
+
+# IntelliJ
+.idea
+*.iml
