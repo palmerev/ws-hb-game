@@ -14,6 +14,7 @@ import {
     Redirect,
 } from "react-router-dom";
 import cookie from "react-cookies";
+import Sockette from "sockette";
 import CreateGamePage from './components/CreateGamePage';
 
 import './styles/index.scss';
@@ -52,32 +53,36 @@ const GamePage = (props) => {
         if (typeof clientId === 'undefined') {
             // request clientId
         }
-        let wsPing = new WebSocket('ws://dev.flatcow.space/ws/ping');
-        wsPing.onopen = (event) => {
-            console.log('connection open:', event);
-        }
-        wsPing.onerror = (event) => {
-            console.log('error:', event);
-            setWSError(event);
-        }
-        wsPing.onclose = (event) => {
-            console.log('connection closed:', event);
-            if (wsError !== null) {
-                // try to re-establish the connection
-            }
-        }
-        wsPing.onmessage = (event) => {
-            console.log('message::data:', JSON.parse(event.data));
-            const msg = JSON.parse(event.data);
-            if (msg.type === "pong") {
-                console.log("received pong");
-            } else {
-                console.log('received unknown message');
-            }
-        }
+        let wsPing = new Sockette('ws://dev.flatcow.space/ws/ping',
+            {
+                timeout: 3000,
+                onopen: (event) => {
+                    if (wsError !== null) {
+                        setWSError(null);
+                    }
+                    console.log('connection open:', event);
+                },
+                onreconnect: (event) => console.log('reconnecting...', event),
+                onerror: (event) => {
+                    console.log('error:', event);
+                    setWSError(event);
+                },
+                onclose: (event) => {
+                    console.log('connection closed:', event);
+                },
+                onmessage: (event) => {
+                    console.log('message::data:', JSON.parse(event.data));
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === "pong") {
+                        console.log("received pong");
+                    } else {
+                        console.log('received unknown message');
+                    }
+                },
+            });
         const pingInterval = setInterval(() => {
             wsPing.send(JSON.stringify({'ping': true}));
-        }, 3000);
+        }, 2000);
 
         return () => clearInterval(pingInterval);
     });

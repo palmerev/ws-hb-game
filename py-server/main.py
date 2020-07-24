@@ -77,6 +77,7 @@ class Game(object):
 class HBPlayer(object):
     nickname = attr.ib(type=str)
     client_id = attr.ib(type=str, default='')
+    connection = attr.ib(type=str, default=None)
     tokens = attr.ib(type=int, default=3)
     word = attr.ib(type=str, default='')
     active = attr.ib(default=False)
@@ -95,7 +96,9 @@ class GameModel(BaseModel):
     players: List[PlayerModel] = []
     is_started: bool
 
-
+@attr.s
+class Msg(object):
+    type: str
 
 app = FastAPI()
 
@@ -110,7 +113,7 @@ async def pong(websocket: WebSocket):
     await websocket.accept()
     while True:
         data = await websocket.receive_json()
-        print(f"received message {data}")
+        print(f"received message {data} from {id(websocket)}")
         await websocket.send_json({"type": "pong"})
 
 @app.get("/hb/join-game")
