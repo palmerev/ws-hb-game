@@ -37,10 +37,10 @@ const CreateGamePage = () => {
                 return await response.json();
             }
         })
-        .then(json => {
-            console.log({json});
-            if (json.gameId) {
-                setGameId(json.gameId);
+        .then(gameJson => {
+            console.log({createGameResponse: gameJson});
+            if (gameJson.gameId) {
+                setGameId(gameJson.gameId);
             } else {
                 setError('game id not found');
             }

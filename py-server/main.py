@@ -1,16 +1,24 @@
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Any
 import uuid
 
 import attr
-from fastapi import FastAPI, WebSocket, Response, status
+from fastapi import (
+    Cookie,
+    FastAPI,
+    Response,
+    status,
+    WebSocket,
+)
+from starlette.websockets import WebSocketDisconnect
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
 
-from utils import gen_client_id
+from utils import gen_client_id, msg
+from utils import HBPlayer, HBPlayerOut, GameOut, Game
 from gameid import gen_game_id
 
 MAX_GAMES = 20
 MAX_PLAYERS_PER_GAME = 10
+WS_KEY = 'sec-websocket-key'
 
 # maps game id to Game object
 GAMES = {}
@@ -20,86 +28,6 @@ class GameLockedException(Exception):
     pass
 
 
-@attr.s
-class Game(object):
-    id = attr.ib(type=str)  # slug, essentially
-    players = attr.ib(factory=list)
-    is_started = attr.ib(default=False)
-    is_locked = attr.ib(default=False)
-
-    def add_player(self, player):
-        if self.is_locked:
-            raise GameLockedException('This game is locked, new players cannot join.')
-        self.players.append(player)
-
-    def remove_player(self, client_id):
-        return self.players.pop(client_id) if self.player_count > 0 else None
-
-    def get_player(self, client_id):
-        return self.players.get(client_id, None)
-
-    def get_active_player(self):
-        active_players = [p for p in self.players if p.active]
-        if not self.is_started:
-            return None
-        elif len(active_players) == 1:
-            return active_players[0]
-        else:
-            raise Exception('Error: expected one active player, found', len(active_players))
-
-    def has_player(self, client_id):
-        return client_id in self.players
-
-    @property
-    def player_count(self):
-        return len(self.players)
-
-    def start_next_turn(self):
-        # find the index of the active player and set active = False
-        # use index+1 to set the next active player (0 if index +1 == self.player_count()
-        if self.player_count == 1:
-            pass
-        else:
-            idx = None
-            for i, player in self.players.items():
-                if player.active:
-                    idx = i
-            if idx is None:
-                print('Error: setting active player to 0')
-                idx = 0
-            else:
-                self.players[idx].active = False
-                next_idx = idx + 1 if idx + 1 < len(self.players) else 0
-                self.players[next_idx].active = True
-
-
-@attr.s
-class HBPlayer(object):
-    nickname = attr.ib(type=str)
-    client_id = attr.ib(type=str, default='')
-    connection = attr.ib(type=str, default=None)
-    tokens = attr.ib(type=int, default=3)
-    word = attr.ib(type=str, default='')
-    active = attr.ib(default=False)
-
-
-class PlayerModel(BaseModel):
-    nickname: str
-    client_id: str
-    tokens: int
-    word: str
-    active: bool
-
-
-class GameModel(BaseModel):
-    id: str
-    players: List[PlayerModel] = []
-    is_started: bool
-
-@attr.s
-class Msg(object):
-    type: str
-
 app = FastAPI()
 
 
@@ -108,87 +36,97 @@ async def read_root():
     return {"Hello": "World"}
 
 
-@app.websocket("/ws/ping")
-async def pong(websocket: WebSocket):
-    await websocket.accept()
-    while True:
-        data = await websocket.receive_json()
-        print(f"received message {data} from {id(websocket)}")
-        await websocket.send_json({"type": "pong"})
+@app.websocket("/ws/hbgame/{game_id}")
+async def ws_hbgame_handler(websocket: WebSocket, game_id: str, client_id: Optional[str] = Cookie(None)):
+    try:
+        await websocket.accept()
+        print(websocket.__dict__)
+        while True:
+            data = await websocket.receive_json()
+            print(f"GAME HANDLER: {data} {type(data)}")
+    #         print(f"received message {data} from {id(websocket)}")
+            if not client_id:
+                await websocket.send_json({
+                    "type": "error",
+                    "msg": "missing client id"
+                })
+            else:
+                print('client_id:', client_id)
+            for game in GAMES.values():
+                for player in game.players:
+                    if (player.client_id == client_id
+                        and player.websocket != websocket):
+                        player.websocket = websocket
+            if data['type'] == "ping":
+                await websocket.send_json({"type": "pong"})
+            elif data['type'] == "preJoin":
+                # 'join' event adds player to game if possible
+                # returns all players in that game (including added player) OR error
+                print('got "preJoin" event', data)
+                if game_id in GAMES:
+                    game = GAMES[game_id]
+#                     print(f'game: {GAMES[game_id].dict()}')
+                    if not game.has_player(client_id):
+                        game.add_player(HBPlayer(
+                            nickname=f'Player {game.player_count + 1}',
+                            client_id=client_id,
+                            websocket=websocket,
+                        ))
+                    game_out = GameOut.parse_obj(GAMES[game_id].dict())
+                    print(f'preJoin response: {game_out}')
+                    game_sockets = game.sockets()
+                    for ws in game_sockets:
+                        await ws.send_json({"type": "preJoin", "game": game_out.dict()})
+                else:
+                    await websocket.close(code=1000)  # game id doesn't exist
+            else:
+                pass
+    except WebSocketDisconnect as e:
+        print("disconnected", client_id, e.code)
+        game_ids_to_remove = set()
+#        TOO AGGRESSIVE, NOT FAULT TOLERANT
+#        for game in GAMES.values():
+#             players = [p for p in game.players if p.websocket == websocket]
+#             for p in players:
+#                 game.remove_player(p.client_id)
+#                 print(f'removed player {p.nickname} {p.client_id}')
+#             if game.player_count == 0:
+#                 games_to_remove.append(game.id)
+#         for gid in game_ids_to_remove:
+#             print(f'deleting game {gid}')
+#             del GAMES[gid]
 
-@app.get("/hb/join-game")
-async def join_hb_game(data: Dict, response: Response):
-    print(f"request to join game: {data}")
-    # TODO: only set cookie if it's not already set
-    response.set_cookie(key="flatcowhbclient", value=client_id, max_age=60 * 60 * 25)
-    return {"gameId": data.get("gameId")}
+
+@app.get("/hb/join-game/{game_id}")
+async def join_hb_game(game_id: str, response: Response, client_id: Optional[str] = Cookie(None)):
+    if not client_id:
+        response.set_cookie(key="client_id", value=gen_client_id(), max_age=60 * 60 * 25, samesite='strict')
+    if game_id in GAMES and len(GAMES[game_id].players) < MAX_PLAYERS_PER_GAME:
+        return {"gameId": game_id}
+    elif game_id not in GAMES:
+        return {"error": "Invalid game ID"}
+    elif len(GAMES[game_id].players) >= MAX_PLAYERS_PER_GAME:
+        return {"error": f"This game already has {MAX_PLAYERS_PER_GAME} players"}
+    else:
+        return {"error": "Couldn't join the game for some reason."}
+
 
 @app.post("/hb/create-game", status_code=status.HTTP_201_CREATED)
 async def create_hb_game(data: Dict, response: Response):
     print(f"request to create game: {data}")
     # TODO: limit number of games one client can start (based on cookie)
+    if len(GAMES) >= MAX_GAMES:
+        return {"error": "too many games in progress"}
     game_id = gen_game_id()
     while game_id in GAMES:
         game_id = gen_game_id()
-    game = Game(game_id)
+    game = Game(id=game_id)
     client_id: str = gen_client_id()
     player = HBPlayer(
-        data.get('nickname', 'Player{}'.format(game.player_count + 1)),
-        client_id
+        nickname=data.get('nickname', f'Player {game.player_count + 1}'),
+        client_id=client_id,
     )
     game.add_player(player)
     GAMES[game.id] = game
-    response.set_cookie(key="flatcowhbclient", value=client_id, max_age=60 * 60 * 25)
-    return {
-        "gameId": game.id,
-        "nickname": data.get('nickname'),
-        "gameCount": len(GAMES),
-        }
-
-# html = """
-# <!DOCTYPE html>
-# <html>
-#     <head>
-#         <title>Chat</title>
-#     </head>
-#     <body>
-#         <h1>WebSocket Chat</h1>
-#         <form action="" onsubmit="sendMessage(event)">
-#             <input type="text" id="messageText" autocomplete="off"/>
-#             <button>Send</button>
-#         </form>
-#         <ul id='messages'>
-#         </ul>
-#         <script>
-#             var ws = new WebSocket("ws://localhost:8000/ws");
-#             ws.onmessage = function(event) {
-#                 var messages = document.getElementById('messages')
-#                 var message = document.createElement('li')
-#                 var content = document.createTextNode(event.data)
-#                 message.appendChild(content)
-#                 messages.appendChild(message)
-#             };
-#             function sendMessage(event) {
-#                 var input = document.getElementById("messageText")
-#                 ws.send(input.value)
-#                 input.value = ''
-#                 event.preventDefault()
-#             }
-#         </script>
-#     </body>
-# </html>
-# """
-
-
-# @app.get("/test-ws")
-# async def get():
-#     return HTMLResponse(html)
-
-
-# @app.websocket("/ws")
-# async def websocket_endpoint(websocket: WebSocket, response: Response):
-#     await websocket.accept()
-#     while True:
-#         data = await websocket.receive_text()
-#         print(f"Received: {data}")
-#         await websocket.send_text(f"Message text was: {data}")
+    response.set_cookie(key="client_id", value=client_id, max_age=60 * 60 * 25, samesite='strict')
+    return {"gameId": game.id}
